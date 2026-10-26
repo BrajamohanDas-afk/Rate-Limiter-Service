@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rate Limiter Service</title>
+<style>
+  :root {
+    --bg: #ECEDEF;
+    --ink: #131519;
+    --panel: #F7F8F9;
+    --accent: #FF4F00;
+    --accent-dark: #E04600;
+    --ok: #1F9D55;
+    --no: #D93025;
+    --line: rgba(19, 21, 25, 0.22);
+    --sans: "Segoe UI Variable Display", "Segoe UI", system-ui, Arial, sans-serif;
+    --mono: "Cascadia Mono", Consolas, "Courier New", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 20px 24px 14px;
+    border-bottom: 2px solid var(--ink);
+  }
+  h1 {
+    margin: 0;
+    font-size: clamp(20px, 3vw, 28px);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    font-weight: 800;
+  }
+  .meta-tag {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: rgba(19, 21, 25, 0.62);
+  }
+  main {
+    display: grid;
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: 0;
+    min-height: calc(100vh - 66px);
+  }
+  .panel { padding: 20px 24px; }
+  .controls {
+    border-right: 1px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--panel);
+  }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+  label.eyebrow { color: var(--ink); }
+  select, input[type="text"], input[type="number"] {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 10px;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    background: #fff;
+    color: var(--ink);
+    width: 100%;
+  }
+  button {
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 12px 14px;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    cursor: pointer;
+    background: transparent;
+    color: var(--ink);
+  }
+  button:focus-visible, select:focus-visible, input:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+  #send {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  #send:hover:not(:disabled) { background: var(--accent-dark); border-color: var(--accent-dark); }
+  #send:disabled { opacity: 0.55; cursor: wait; }
+  .hint {
+    font-size: 12px;
+    color: rgba(19, 21, 25, 0.65);
+    margin: 0;
+  }
+  .workspace { display: flex; flex-direction: column; gap: 0; }
+  .rack-panel { border-bottom: 1px solid var(--ink); }
+  .rack-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .rack-label { font-family: var(--mono); font-size: 12px; }
+  .rack {
+    display: flex;
+    gap: 4px;
+    min-height: 34px;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .slot {
+    width: 20px;
+    height: 34px;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    background: transparent;
+    transition: background-color 0.18s ease;
+  }
+  .slot.filled { background: var(--ink); }
+  .slot.burned { background: var(--accent); border-color: var(--accent); }
+  .meter {
+    position: relative;
+    height: 34px;
+    width: 100%;
+    border: 1px solid var(--ink);
+    border-radius: 2px;
+    overflow: hidden;
+    background: transparent;
+  }
+  .meter-fill {
+    position: absolute;
+    inset: 0 auto 0 0;
+    background: var(--ink);
+    transition: width 0.18s ease;
+  }
+  .meter-ticks {
+    position: absolute;
+    inset: 0;
+    background-image: repeating-linear-gradient(to right,
+      transparent 0, transparent calc(10% - 1px),
+      rgba(236, 237, 239, 0.5) calc(10% - 1px), rgba(236, 237, 239, 0.5) 10%);
+  }
+  .counters {
+    display: flex;
+    gap: 28px;
+    flex-wrap: wrap;
+  }
+  .counter { display: flex; flex-direction: column; gap: 2px; }
+  .counter b { font-family: var(--mono); font-size: 20px; font-weight: 600; }
+  .log-panel { flex: 1; overflow: auto; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  thead th {
+    text-align: left;
+    font-family: var(--sans);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 6px 10px;
+    border-bottom: 2px solid var(--ink);
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--line);
+    white-space: nowrap;
+  }
+  tbody tr.row-in { animation: rowin 0.16s ease; }
+  @keyframes rowin { from { opacity: 0; } to { opacity: 1; } }
+  .pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border: 1px solid currentColor;
+    border-radius: 2px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .pill.ok { color: var(--ok); }
+  .pill.no { color: var(--no); }
+  .pill.warn { color: var(--accent); }
+  td.empty {
+    color: rgba(19, 21, 25, 0.55);
+    font-family: var(--sans);
+    padding: 14px 10px;
+  }
+  @media (max-width: 720px) {
+    main { grid-template-columns: 1fr; }
+    .controls { border-right: 0; border-bottom: 1px solid var(--ink); }
+    .slot { width: 15px; height: 28px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .slot, .meter-fill { transition: none; }
+    tbody tr.row-in { animation: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rate Limiter</h1>
+  <span class="meta-tag">token bucket &middot; per-key quota &middot; 200 / 429</span>
+</header>
+
+<main>
+  <section class="panel controls" aria-label="Request controls">
+    <div class="field">
+      <label class="eyebrow" for="apiKey">API key</label>
+      <select id="apiKey">
+        <option value="free-demo-key">free-demo-key &mdash; 10/min</option>
+        <option value="pro-demo-key">pro-demo-key &mdash; 100/min</option>
+        <option value="admin-demo-key">admin-demo-key &mdash; unlimited</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="eyebrow" for="targetKey">Target key</label>
+      <input id="targetKey" type="text" value="user123" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label class="eyebrow" for="burst">Burst count</label>
+      <input id="burst" type="number" value="12" min="1" max="100" step="1">
+    </div>
+    <button id="send" type="button">Send 12 requests</button>
+    <button id="clear" type="button">Clear log</button>
+    <p class="hint">Requests run one at a time against <code>POST /check-limit</code> so you can watch the quota move.</p>
+  </section>
+
+  <div class="workspace">
+    <section class="panel rack-panel" aria-label="Token rack">
+      <div class="rack-head">
+        <span class="eyebrow">Token rack</span>
+        <span class="rack-label" id="rackLabel">&mdash;</span>
+      </div>
+      <div class="rack" id="rack" aria-live="polite"></div>
+      <p class="hint" style="margin-top:10px">Each slot is one request you can still make right now.</p>
+    </section>
+
+    <section class="panel rack-panel" aria-label="Counters">
+      <div class="counters">
+        <div class="counter"><span class="eyebrow">Sent</span><b id="cSent">0</b></div>
+        <div class="counter"><span class="eyebrow">Allowed</span><b id="cAllowed">0</b></div>
+        <div class="counter"><span class="eyebrow">Denied</span><b id="cDenied">0</b></div>
+      </div>
+    </section>
+
+    <section class="panel log-panel" aria-label="Request log">
+      <table>
+        <thead>
+          <tr><th>#</th><th>Status</th><th>Tier</th><th>Remaining</th><th>Retry after</th><th>Elapsed</th></tr>
+        </thead>
+        <tbody id="log"></tbody>
+      </table>
+    </section>
+  </div>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var apiKeyEl = document.getElementById("apiKey");
+  var targetEl = document.getElementById("targetKey");
+  var burstEl = document.getElementById("burst");
+  var sendEl = document.getElementById("send");
+  var clearEl = document.getElementById("clear");
+  var logEl = document.getElementById("log");
+  var rackEl = document.getElementById("rack");
+  var rackLabelEl = document.getElementById("rackLabel");
+  var counters = { sent: 0, allowed: 0, denied: 0 };
+  var running = false;
+
+  function setCounters() {
+    document.getElementById("cSent").textContent = counters.sent;
+    document.getElementById("cAllowed").textContent = counters.allowed;
+    document.getElementById("cDenied").textContent = counters.denied;
+  }
+
+  function emptyLog(message) {
+    logEl.innerHTML = "";
+    var tr = document.createElement("tr");
+    var td = document.createElement("td");
+    td.colSpan = 6;
+    td.className = "empty";
+    td.textContent = message;
+    tr.appendChild(td);
+    logEl.appendChild(tr);
+  }
+
+  function pillClass(status) {
+    if (status === 200) return "ok";
+    if (status === 429) return "no";
+    return "warn";
+  }
+
+  function pillText(status, data) {
+    if (status === 200) return "Allowed";
+    if (status === 429) return data.scope === "ip" ? "Denied (IP)" : "Denied";
+    if (status === 401) return "Bad API key";
+    if (status === 422) return "Invalid body";
+    return "HTTP " + status;
+  }
+
+  function appendRow(n, status, data, ms) {
+    if (logEl.querySelector("td.empty")) logEl.innerHTML = "";
+    var tr = document.createElement("tr");
+    tr.className = "row-in";
+    function cell(text) {
+      var td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+      return td;
+    }
+    cell(String(n));
+    var statusCell = cell("");
+    var pill = document.createElement("span");
+    pill.className = "pill " + pillClass(status);
+    pill.textContent = pillText(status, data);
+    statusCell.appendChild(pill);
+    cell(data.tier || (data.scope === "ip" ? "ip" : "-"));
+    cell(data.remaining != null ? String(data.remaining) : "-");
+    cell(data.retryAfter != null ? data.retryAfter + "s" : "-");
+    cell(ms + " ms");
+    logEl.insertBefore(tr, logEl.firstChild);
+    while (logEl.children.length > 200) logEl.removeChild(logEl.lastChild);
+  }
+
+  function renderRack(limit, remaining, unlimited, label) {
+    rackEl.innerHTML = "";
+    rackLabelEl.textContent = label;
+    if (unlimited) {
+      var full = document.createElement("div");
+      full.className = "meter";
+      var fill = document.createElement("div");
+      fill.className = "meter-fill";
+      fill.style.width = "100%";
+      fill.style.background = "var(--accent)";
+      full.appendChild(fill);
+      rackEl.appendChild(full);
+      return;
+    }
+    if (limit == null || remaining == null) return;
+    if (limit <= 20) {
+      for (var i = 0; i < limit; i++) {
+        var slot = document.createElement("div");
+        slot.className = "slot " + (i < remaining ? "filled" : (i < limit ? "burned" : ""));
+        rackEl.appendChild(slot);
+      }
+      return;
+    }
+    var meter = document.createElement("div");
+    meter.className = "meter";
+    var mfill = document.createElement("div");
+    mfill.className = "meter-fill";
+    mfill.style.width = Math.max(0, Math.min(100, (remaining / limit) * 100)) + "%";
+    var ticks = document.createElement("div");
+    ticks.className = "meter-ticks";
+    meter.appendChild(mfill);
+    meter.appendChild(ticks);
+    rackEl.appendChild(meter);
+  }
+
+  async function fire(n, apiKey, target) {
+    var t0 = performance.now();
+    try {
+      var res = await fetch("/check-limit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-API-Key": apiKey },
+        body: JSON.stringify({ key: target })
+      });
+      var data = {};
+      try { data = await res.json(); } catch (e) { /* non-json error body */ }
+      var ms = Math.round(performance.now() - t0);
+      var rem = res.headers.get("X-RateLimit-Remaining");
+      var lim = res.headers.get("X-RateLimit-Limit");
+      var retry = data.retryAfter != null ? data.retryAfter : res.headers.get("Retry-After");
+      appendRow(n, res.status, {
+        tier: data.tier, scope: data.scope,
+        remaining: rem, retryAfter: retry != null ? retry : null
+      }, ms);
+      counters.sent++;
+      if (res.status === 200) counters.allowed++; else counters.denied++;
+      setCounters();
+      if (data.tier === "admin") {
+        renderRack(null, null, true, target + " \u00b7 admin \u00b7 unlimited");
+      } else if (lim != null && rem != null) {
+        renderRack(parseInt(lim, 10), parseInt(rem, 10), false,
+          target + " \u00b7 " + (data.tier || "?") + " \u00b7 " + rem + "/" + lim);
+      }
+    } catch (err) {
+      counters.sent++;
+      counters.denied++;
+      setCounters();
+      emptyLog("Service unreachable. Start it with: python -m uvicorn main:app --port 3000");
+    }
+  }
+
+  async function send() {
+    if (running) return;
+    var n = Math.max(1, Math.min(100, parseInt(burstEl.value, 10) || 1));
+    var apiKey = apiKeyEl.value;
+    var target = targetEl.value.trim() || "user123";
+    running = true;
+    sendEl.disabled = true;
+    for (var i = 1; i <= n; i++) {
+      sendEl.textContent = "Sending " + i + "/" + n;
+      await fire(i, apiKey, target);
+    }
+    sendEl.disabled = false;
+    updateSendLabel();
+    running = false;
+  }
+
+  function updateSendLabel() {
+    var n = Math.max(1, Math.min(100, parseInt(burstEl.value, 10) || 1));
+    sendEl.textContent = "Send " + n + " request" + (n === 1 ? "" : "s");
+  }
+
+  sendEl.addEventListener("click", send);
+  burstEl.addEventListener("input", updateSendLabel);
+  clearEl.addEventListener("click", function () {
+    counters = { sent: 0, allowed: 0, denied: 0 };
+    setCounters();
+    emptyLog("Send a request to see it here.");
+    renderRack(null, null, false, "\u2014");
+  });
+
+  updateSendLabel();
+  emptyLog("Send a request to see it here.");
+  renderRack(null, null, false, "\u2014");
+})();
+</script>
+</body>
+</html>
